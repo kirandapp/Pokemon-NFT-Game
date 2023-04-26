@@ -253,6 +253,9 @@ contract StatsContract is Ownable {
     function getBattleTypes() public view returns (string[5] memory) {
         return BattleType;
     }
+    function getStatTypes() public view returns (string[5] memory) {
+        return StatType;
+    }
     function getCreatedBattle(uint256 _matchId) public view returns (uint256, uint256, uint256, uint256, uint256) {
         Battle memory bt = _battle[_matchId];
         return (bt.matchId, bt.nftid, bt.stat, bt.statIndex, bt.stateSum);
