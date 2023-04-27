@@ -112,6 +112,10 @@ contract PokemonNFT is ERC721Enumerable, Ownable {
     function setBaseURI(string memory baseURI_) external onlyOwner {
         _baseUri = baseURI_;
     }
+    
+    function setPokemonGameContract(address _pokemonGameContract) external onlyOwner() {
+        pg = PokemonGame(_pokemonGameContract);
+    }
 
     // internal functions
     function _baseURI() internal view virtual override returns (string memory) {
