@@ -39,10 +39,10 @@ contract PokemonGame is Ownable {
         uint256 statIndex;
         uint256 battle;
         uint256 stateSum;
-        bool winnerDeclared;
     }
     mapping (uint256 => Battle) private _battle;
     mapping (uint256 => uint256) private winner;
+    mapping (uint256 => bool) public winnerDeclared;
 
     mapping (uint256 => PokemonStats) private _pokemonStats;
     mapping (address => bool) private isWhitelist;
@@ -93,13 +93,13 @@ contract PokemonGame is Ownable {
         _matchIdCounter.increment();
         uint256 _matchId = _matchIdCounter.current();
         uint256 sum = findSumOfStats(randomNftId);
-        _battle[_matchId] = Battle(_matchId, randomNftId, stat, statindex, nftstats.battleType, sum, false);
+        _battle[_matchId] = Battle(_matchId, randomNftId, stat, statindex, nftstats.battleType, sum);
         matchIds.push(_matchId);
     }
 
     function play(uint _matchId) public {
+        require(!winnerDeclared[_matchId],"Invalid MatchId!");
         Battle memory bt = _battle[_matchId];
-        require(!bt.winnerDeclared,"This MatchId Closed");
         uint256 numNFTs = NFTContract.balanceOf(msg.sender);
         require(numNFTs > 0, "You don't have any NFTs");
         require(TokenContract.balanceOf(msg.sender) >= tokenPriceToPlay, "Insufficient Token to play ");
@@ -217,7 +217,7 @@ contract PokemonGame is Ownable {
             console.log("NO ONE IS WINNER");
             winner[_matchId] = 0;
         }
-        bt.winnerDeclared = true;
+        winnerDeclared[_matchId] = true;
     }
 
     //internal function
