@@ -4,13 +4,14 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "hardhat/console.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/IERC721Enumerable.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-contract PokemonGame is Ownable {
+contract PokemonGame is Ownable, IERC721Receiver {
 
     using Counters for Counters.Counter;
     Counters.Counter private _matchIdCounter;
 
-    IERC721Enumerable private NFTContract;
+    IERC721Enumerable private NFTContract; 
     IERC20 private TokenContract;
     address public feeAddress;
 
@@ -18,7 +19,7 @@ contract PokemonGame is Ownable {
     uint256 public fee = 500; //5%  
     bool public isInitialize; 
 
-    uint256[] public matchIds; 
+    uint256[] private matchIds; 
 
     struct PokemonStats {
         uint256 attack;
@@ -30,7 +31,7 @@ contract PokemonGame is Ownable {
         uint256 battleType;
     }
     string[5] BattleType = ["WOOD","WATER","LAND","FIRE","AIR"] ;//Wood water land fire AIR
-    string[5] StatType = ["ATTACK","DEFENSE","SP","HP","MP"] ;//Wood water land fire AIR
+    string[5] StatType = ["ATTACK","DEFENSE","SP","HP","MP"] ;//ATTACK DEFENSE SP HP MP
     
     struct Battle {
         uint256 matchId;
@@ -40,12 +41,25 @@ contract PokemonGame is Ownable {
         uint256 battle;
         uint256 stateSum;
     }
+    enum BattleStatus {Close, Open, Cancel, Draw}
+
     mapping (uint256 => Battle) private _battle;
+    mapping (uint256 => bool) public matchIdExist;
+
     mapping (uint256 => uint256) private winner;
     mapping (uint256 => bool) public winnerDeclared;
+    mapping (uint256 => BattleStatus) private battleStatus;
 
     mapping (uint256 => PokemonStats) private _pokemonStats;
     mapping (address => bool) private isWhitelist;
+
+    function isContract(address _addr) private returns (bool isContract){
+        uint32 size;
+        assembly {
+            size := extcodesize(_addr)
+        }
+        return (size > 0);
+    }
 
     function initialize(address _nft, address _token) public {
         require(!isInitialize,"Already Initialize!");
@@ -59,7 +73,7 @@ contract PokemonGame is Ownable {
         isInitialize = true;
     }
     
-    function createBattle() public {
+    function createBattle() external {
         uint256 numNFTs = NFTContract.balanceOf(msg.sender);
         console.log(numNFTs);
         require(numNFTs > 0, "You don't have any NFTs");
@@ -75,6 +89,7 @@ contract PokemonGame is Ownable {
         console.log("1");
         uint256 randomNftId = nftIds[randomIndex];
         console.log("Selected Id",randomNftId);
+        NFTContract.safeTransferFrom(msg.sender, address(this), randomNftId); //getNft
         PokemonStats memory nftstats = _pokemonStats[randomNftId];
         uint256 statindex = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % 5;
         uint256 stat;
@@ -95,10 +110,13 @@ contract PokemonGame is Ownable {
         uint256 sum = findSumOfStats(randomNftId);
         _battle[_matchId] = Battle(_matchId, randomNftId, stat, statindex, nftstats.battleType, sum);
         matchIds.push(_matchId);
+        battleStatus[_matchId] = BattleStatus.Open;
+        matchIdExist[_matchId] = true;
     }
 
-    function play(uint _matchId) public {
-        require(!winnerDeclared[_matchId],"Invalid MatchId!");
+    function play(uint _matchId) external {
+        require(matchIdExist[_matchId],"Invalid MatchId!!");
+        require(!winnerDeclared[_matchId],"MatchId closed");
         Battle memory bt = _battle[_matchId];
         uint256 numNFTs = NFTContract.balanceOf(msg.sender);
         require(numNFTs > 0, "You don't have any NFTs");
@@ -113,6 +131,7 @@ contract PokemonGame is Ownable {
         console.log("1");
         uint256 randomNftId = nftIds[randomIndex];
         console.log("Selected ID",randomNftId);
+        NFTContract.safeTransferFrom(msg.sender, address(this), randomNftId); //getNft
         PokemonStats memory nftstats = _pokemonStats[randomNftId];
         uint256 sum = findSumOfStats(randomNftId);
         uint statindex = bt.statIndex;
@@ -138,86 +157,106 @@ contract PokemonGame is Ownable {
             console.log("Winner is ",bt.nftid);
             // winner[_matchId] = string(abi.encodePacked(matchnftId," is the winner..."));
             winner[_matchId] = bt.nftid;
+            battleStatus[_matchId] = BattleStatus.Close;
             calculateFee(tokenPriceToPlay, bt.nftid);            
         } else if (bt.stat < stat) {
             console.log("Winner is ",randomNftId);
-            // winner[_matchId] = string(abi.encodePacked(randomNftId," is the winner..."));
             winner[_matchId] = randomNftId;
+            battleStatus[_matchId] = BattleStatus.Close;
             calculateFee(tokenPriceToPlay, randomNftId);
         } else if (bt.stateSum > sum) {
             console.log("Winner is ",bt.nftid);
-            // winner[_matchId] = string(abi.encodePacked(randomNftId," is the winner..."));
             winner[_matchId] = bt.nftid;
+            battleStatus[_matchId] = BattleStatus.Close;
             calculateFee(tokenPriceToPlay, bt.nftid);
         } else if (bt.stateSum < sum) {
             console.log("Winner is ",randomNftId);
             winner[_matchId] = randomNftId;
+            battleStatus[_matchId] = BattleStatus.Close;
             calculateFee(tokenPriceToPlay, randomNftId);
         } else if(bt.battle == 0) {
             if(nftstats.battleType == 1 || nftstats.battleType == 2) {
                 console.log("Winner is ",bt.nftid);
-                // winner[_matchId] = string(abi.encodePacked(matchnftId," is the winner..."));
                 winner[_matchId] = bt.nftid;
+                battleStatus[_matchId] = BattleStatus.Close;
                 calculateFee(tokenPriceToPlay, bt.nftid);
             } else {
                 console.log("Winner is ",randomNftId);
-                // winner[_matchId] = string(abi.encodePacked(randomNftId," is the winner..."));
                 winner[_matchId] = randomNftId;
+                battleStatus[_matchId] = BattleStatus.Close;
                 calculateFee(tokenPriceToPlay, randomNftId);
             }
         } else if(bt.battle == 1) {
             if(nftstats.battleType == 2 || nftstats.battleType == 3) {
                 console.log("Winner is ",bt.nftid);
-                // winner[_matchId] = string(abi.encodePacked(matchnftId," is the winner..."));
                 winner[_matchId] = bt.nftid;
+                battleStatus[_matchId] = BattleStatus.Close;
                 calculateFee(tokenPriceToPlay, bt.nftid);
             } else {
                 console.log("Winner is ",randomNftId);
-                // winner[_matchId] = string(abi.encodePacked(randomNftId," is the winner..."));
                 winner[_matchId] = randomNftId;
+                battleStatus[_matchId] = BattleStatus.Close;
                 calculateFee(tokenPriceToPlay, randomNftId);
             }
         } else if(bt.battle == 2) {
             if(nftstats.battleType == 3 || nftstats.battleType == 4) {
                 console.log("Winner is ",bt.nftid);
-                // winner[_matchId] = string(abi.encodePacked(matchnftId," is the winner..."));
                 winner[_matchId] = bt.nftid;
+                battleStatus[_matchId] = BattleStatus.Close;
                 calculateFee(tokenPriceToPlay, bt.nftid);
             } else {
                 console.log("Winner is ",randomNftId);
-                // winner[_matchId] = string(abi.encodePacked(randomNftId," is the winner..."));
                 winner[_matchId] = randomNftId;
                 calculateFee(tokenPriceToPlay, randomNftId);
             }
         } else if(bt.battle == 3) {
             if(nftstats.battleType == 0 || nftstats.battleType == 4) {
                 console.log("Winner is ",bt.nftid);
-                // winner[_matchId] = string(abi.encodePacked(matchnftId," is the winner..."));
                 winner[_matchId] = bt.nftid;
+                battleStatus[_matchId] = BattleStatus.Close;
                 calculateFee(tokenPriceToPlay, bt.nftid);
             } else {
                 console.log("Winner is ",randomNftId);
-                // winner[_matchId] = string(abi.encodePacked(randomNftId," is the winner..."));
                 winner[_matchId] = randomNftId;
+                battleStatus[_matchId] = BattleStatus.Close;
                 calculateFee(tokenPriceToPlay, randomNftId);
             }
         } else if(bt.battle == 4) {
             if(nftstats.battleType == 0 || nftstats.battleType == 1) {
                 console.log("Winner is ",bt.nftid);
-                // winner[_matchId] = string(abi.encodePacked(matchnftId," is the winner..."));
                 winner[_matchId] = bt.nftid;
+                battleStatus[_matchId] = BattleStatus.Close;
                 calculateFee(tokenPriceToPlay, bt.nftid);
             } else {
                 console.log("Winner is ",randomNftId);
-                // winner[_matchId] = string(abi.encodePacked(randomNftId," is the winner..."));
                 winner[_matchId] = randomNftId;
+                battleStatus[_matchId] = BattleStatus.Close;
                 calculateFee(tokenPriceToPlay, randomNftId);
             }
         } else {
             console.log("NO ONE IS WINNER");
             winner[_matchId] = 0;
+            battleStatus[_matchId] = BattleStatus.Draw;
         }
         winnerDeclared[_matchId] = true;
+        NFTContract.safeTransferFrom(address(this), msg.sender, randomNftId); //give back to player
+        NFTContract.safeTransferFrom(address(this), NFTContract.ownerOf(bt.nftid), bt.nftid); //give back to creater
+    }
+
+    function cancelBattle(uint _matchId) external {
+        require(matchIdExist[_matchId],"Invalid MatchId!!");
+        require(!winnerDeclared[_matchId],"MatchId closed");
+        require(battleStatus[_matchId] != BattleStatus.Cancel,"Battle is already Closed");
+        require(battleStatus[_matchId] == BattleStatus.Open,"Battle is not Open");
+        Battle memory bt = _battle[_matchId];
+        TokenContract.transfer(msg.sender, tokenPriceToPlay);
+        console.log("Cancel function NFT balance before - ",NFTContract.balanceOf(msg.sender));
+        NFTContract.safeTransferFrom(address(this), msg.sender, bt.nftid);
+        console.log("Cancel functon NFT balance after transfer - ",NFTContract.balanceOf(msg.sender));
+        battleStatus[_matchId] = BattleStatus.Cancel;
+        delete(_battle[_matchId]);
+        matchIdExist[_matchId] = false;
+        
     }
 
     //internal function
@@ -227,9 +266,10 @@ contract PokemonGame is Ownable {
     }
     function calculateFee(uint256 _token, uint256 nftid) internal {
         address win = NFTContract.ownerOf(nftid);
-        uint256 platformFee = _token * fee / 100 / 100;
-        TokenContract.transferFrom(msg.sender, feeAddress, platformFee);
-        TokenContract.transfer(win, _token*2 - platformFee);
+        uint256 winammount = _token*2;
+        uint256 platformFee = winammount * fee / 100 / 100;
+        TokenContract.transfer(feeAddress, platformFee);
+        TokenContract.transfer(win, (winammount - platformFee));
     }
 
     //  SETTER FUNCTIONS
@@ -237,22 +277,30 @@ contract PokemonGame is Ownable {
         isInitialize = _bool;
     }
     function setNFTaddress(IERC721Enumerable _nft) public onlyOwner {
+        require(isContract(address(_nft)),"This address is not a contract!");
         NFTContract = _nft;
     }
     function setTokenaddress(IERC20 _token) public onlyOwner {
+        require(isContract(address(_token)),"This address is not a contract!");
         TokenContract = _token;
     }
-    function setFeeAddress(address _addr) public onlyOwner {
-        feeAddress = _addr;
+    function setFeeAddress(address _feeCollector) public onlyOwner {
+        require(_feeCollector != address(0),"Fee address can't be set to Zero!");
+        feeAddress = _feeCollector;
+    }
+    function setFeePercent(uint256 _fee) public onlyOwner {
+        require(_fee > 0,"Fee percent should be greater than Zero !");
+        fee = _fee;
+    }
+    function setTokenToPlay(uint256 _tokenamount) public onlyOwner {
+        require(_tokenamount > 0,"Token amount to play can't be set to Zero!");
+        tokenPriceToPlay = _tokenamount;
     }
     function setWhitelisted(address _addr) public onlyOwner {
+        require(_addr != address(0),"Address can't be Zero!");
         isWhitelist[_addr] = true;
     }
-    function setBattleType(string[] memory _type) public onlyOwner {
-        for ( uint i = 0; i < _type.length; i++ ) {
-            BattleType[i] = _type[i];
-        }
-    }
+    
     function setPokemonStats(uint256 tokenId, uint256 attack, uint256 defense, uint256 sp, uint256 hp, uint256 mp, uint _typeIndex) external {
         require(isWhitelist[msg.sender], "StatsContract: Only the whitelisted addresses can set Pokemon stats.");
         require(attack + defense + sp + hp + mp <= 150, "StatsContract: Total stats can't exceed 150.");
@@ -295,4 +343,22 @@ contract PokemonGame is Ownable {
     function getWinner(uint256 _matchId) public view returns (uint) {
         return winner[_matchId];
     }
+    function getMatchIds() external view returns (uint[] memory) {
+        return matchIds;
+    }
+    function getBattleStatus(uint256 _matchId) external view returns(string memory) {
+        if (battleStatus[_matchId] == BattleStatus.Close) {
+            return "Close";   //Close, Open, Cancel, Draw
+        } else if (battleStatus[_matchId] == BattleStatus.Open) {
+            return "Open";
+        } else if (battleStatus[_matchId] == BattleStatus.Cancel) {
+            return "Cancel";
+        } else {
+            return "Draw";
+        }
+    }
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+		return IERC721Receiver.onERC721Received.selector;
+	} 
 }
+
