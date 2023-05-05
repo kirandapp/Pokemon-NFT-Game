@@ -15,6 +15,7 @@ contract PokemonNFT is ERC721Enumerable, Ownable {
     uint constant MIN_STATS_SUM = 50;
     uint public MAX_TO_MINT = 10000;
     uint public MAX_WALLET_SIZE = 20;
+    bool public isInitialize; 
 
     string private _baseUri;
     PokemonGame public pg;
@@ -22,14 +23,19 @@ contract PokemonNFT is ERC721Enumerable, Ownable {
     mapping(uint256 => string) private _tokenURIs;
     mapping(address => bool) public _isBlacklisted;
 
-    constructor(address _pokemonGameAddress, string memory baseUri) ERC721("PokemonNFT", "PKMN") {
+    constructor() ERC721("PokemonNFT", "PKMN") {}
+
+    function initialize(address _pokemonGameAddress, string memory baseUri) public {
+        require(!isInitialize,"Already Initialize!");
+        require(owner() == msg.sender, "Only owner can initialize");
         pg = PokemonGame(_pokemonGameAddress);
         _baseUri = baseUri;
+        isInitialize = true;
     }
 
     function mintPokemon() public returns (uint256) {
         console.log("log 1");
-        require(_tokenIdCounter.current() <= MAX_TO_MINT, "Minting Stopped!");
+        require(_tokenIdCounter.current() + 1 <= MAX_TO_MINT, "Minting Stopped!");
         require(balanceOf(msg.sender) + 1 <= MAX_WALLET_SIZE, "NFT: Balance exceeds wallet size!");
         console.log("log 2");
         uint[6] memory stats;
@@ -80,7 +86,14 @@ contract PokemonNFT is ERC721Enumerable, Ownable {
         return tokenId;
     }
 
-    
+    function batchMintPokemon(uint256 numberOfNftIds) public {
+        require(_tokenIdCounter.current() + numberOfNftIds <= MAX_TO_MINT, "Minting Stopped!");
+        require(balanceOf(msg.sender) + numberOfNftIds <= MAX_WALLET_SIZE, "NFT: Balance exceeds wallet size!");
+        for (uint i = 0; i < numberOfNftIds; i++) {
+            mintPokemon();
+        }
+}
+
     function tokensOfOwner(address _owner) public view returns (uint256[] memory) {
         uint256 tokenCount = balanceOf(_owner);
         if (tokenCount == 0) {
@@ -104,15 +117,25 @@ contract PokemonNFT is ERC721Enumerable, Ownable {
         _isBlacklisted[account] = value;
     }
     
+    //setter
+    function setInitialize(bool _bool) public onlyOwner {
+        isInitialize = _bool;
+    }
+
     function setMAX_TO_MINT(uint256 _maxToMint) public onlyOwner {
         require(MAX_TO_MINT > 0,"Max must be greater than 0 !");
         MAX_TO_MINT = _maxToMint;
     }
 
+    function setMAX_WALLET_SIZE(uint256 _maxwalletsize) public onlyOwner {
+        require(MAX_WALLET_SIZE > 0, "Max wallet size must be greater than 0 !");
+        MAX_WALLET_SIZE = _maxwalletsize;
+    }
+
     function setBaseURI(string memory baseURI_) external onlyOwner {
         _baseUri = baseURI_;
     }
-    
+
     function setPokemonGameContract(address _pokemonGameContract) external onlyOwner() {
         pg = PokemonGame(_pokemonGameContract);
     }
